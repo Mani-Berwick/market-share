@@ -117,11 +117,9 @@
   .row.bp .c-pct{color:var(--accent);font-weight:700;}
   .c-remove{
     width:1%;white-space:nowrap;text-align:right;
-    font-size:13px;font-weight:500;color:var(--line);cursor:pointer;
-    opacity:0;transition:opacity 0.15s;
+    font-size:13px;font-weight:500;color:var(--gray-2);cursor:pointer;
   }
-  tr:hover .c-remove{color:var(--gray-2);opacity:1;}
-  tr:hover .c-remove:hover{color:var(--ink);}
+  .c-remove:hover{color:var(--ink);}
 
   .add-row-btn{
     display:block;width:100%;text-align:center;padding:14px;
@@ -159,6 +157,40 @@
 
   .footer{text-align:center;margin-top:64px;font-size:12px;color:var(--gray-2);font-weight:500;}
 
+  /* EDIT MODE */
+  .edit-bar{
+    position:sticky;top:0;z-index:50;
+    background:rgba(255,255,255,0.85);backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--line);
+    padding:14px 24px;text-align:right;
+  }
+  .edit-bar-inner{max-width:760px;margin:0 auto;display:flex;justify-content:flex-end;gap:8px;}
+  .btn-sm{
+    padding:9px 20px;font-weight:600;font-size:14px;border:none;
+    border-radius:980px;cursor:pointer;transition:opacity 0.15s;
+  }
+  .btn-sm:hover{opacity:0.85;}
+  .btn-edit-start{background:var(--surface);color:var(--ink);}
+  .btn-apply{background:var(--ink);color:#fff;}
+  .btn-cancel{background:none;color:var(--gray-1);}
+  .btn-reset-sm{background:none;color:var(--gray-1);}
+
+  body.editing [data-editable="true"]{
+    outline:none;
+    border-bottom:1px dashed var(--accent);
+    background:rgba(0,31,185,0.05);
+    border-radius:3px;
+    padding:1px 3px;
+  }
+  body:not(.editing) [data-editable="true"]{
+    cursor:default;
+  }
+  body:not(.editing) .add-row-btn,
+  body:not(.editing) .c-remove{
+    display:none !important;
+  }
+
   @media (max-width:600px){
     h1{font-size:30px;}
     .header{padding:44px 20px 32px 20px;}
@@ -176,10 +208,16 @@
 </head>
 <body>
 
+<div class="edit-bar">
+  <div class="edit-bar-inner" id="editBarInner">
+    <button class="btn-sm btn-edit-start" onclick="enterEditMode()">Edit Report</button>
+  </div>
+</div>
+
 <div class="header">
   <div class="eyebrow">Market Share Report</div>
-  <h1 id="mainTitle" contenteditable="true">Berwick, Officer, Pakenham</h1>
-  <div class="subtitle" id="subtitleText" contenteditable="true">Who's actually selling this area — the numbers, not the noise.</div>
+  <h1 id="mainTitle" data-editable="true">Berwick, Officer, Pakenham</h1>
+  <div class="subtitle" id="subtitleText" data-editable="true">Who's actually selling this area — the numbers, not the noise.</div>
 </div>
 
 <div class="wrap">
@@ -190,11 +228,11 @@
       <div class="stat-label">Total Sales</div>
     </div>
     <div class="stat">
-      <div class="stat-value" contenteditable="true" id="priceBracket">$600K–$900K</div>
+      <div class="stat-value" data-editable="true" id="priceBracket">$600K–$900K</div>
       <div class="stat-label">Price Bracket</div>
     </div>
     <div class="stat">
-      <div class="stat-value" contenteditable="true" id="dateRange">Jul '25–Jun '26</div>
+      <div class="stat-value" data-editable="true" id="dateRange">Jul '25–Jun '26</div>
       <div class="stat-label">Date Range</div>
     </div>
   </div>
@@ -239,8 +277,6 @@
   </section>
 
   <div class="controls">
-    <button class="btn btn-save" onclick="saveData()">Save Changes</button>
-    <button class="btn btn-reset" onclick="resetData()">Reset</button>
     <button class="btn btn-print" onclick="window.print()">Print / Present</button>
     <div class="save-msg" id="saveMsg"></div>
   </div>
@@ -273,6 +309,7 @@ const DEFAULT_DATA = {
 };
 
 let data = null;
+let editMode = false;
 
 function loadData(){
   const raw = localStorage.getItem(STORAGE_KEY);
@@ -318,17 +355,19 @@ function render(){
       <td class="c-name">
         <div class="c-name-inner">
           <span class="c-swatch"></span>
-          <span contenteditable="true" data-idx="${origIdx}" data-field="name">${escapeHtml(row.name)}</span>
+          <span data-editable="true" data-idx="${origIdx}" data-field="name">${escapeHtml(row.name)}</span>
         </div>
       </td>
-      <td class="c-sales" contenteditable="true" data-idx="${origIdx}" data-field="sales">${row.sales}</td>
+      <td class="c-sales" data-editable="true" data-idx="${origIdx}" data-field="sales">${row.sales}</td>
       <td class="c-pct">${pct}%</td>
       <td class="c-remove" onclick="deleteRow(${origIdx})">Remove</td>
     `;
     tbody.appendChild(tr);
   });
 
-  tbody.querySelectorAll('[contenteditable="true"]').forEach(el => {
+  applyEditState();
+
+  tbody.querySelectorAll('[data-editable="true"]').forEach(el => {
     el.addEventListener('blur', onCellEdit);
     el.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); el.blur(); }});
   });
@@ -450,22 +489,59 @@ function drawPieChart(sorted, total){
   });
 }
 
-function saveData(){
+function applyEditState(){
+  document.body.classList.toggle('editing', editMode);
+  document.querySelectorAll('[data-editable="true"]').forEach(el => {
+    el.contentEditable = editMode ? 'true' : 'false';
+  });
+}
+
+function renderEditBar(){
+  const bar = document.getElementById('editBarInner');
+  if(editMode){
+    bar.innerHTML = `
+      <button class="btn-sm btn-reset-sm" onclick="resetData()">Reset to Default</button>
+      <button class="btn-sm btn-cancel" onclick="cancelEdit()">Cancel</button>
+      <button class="btn-sm btn-apply" onclick="applyChanges()">Apply Changes</button>
+    `;
+  } else {
+    bar.innerHTML = `<button class="btn-sm btn-edit-start" onclick="enterEditMode()">Edit Report</button>`;
+  }
+}
+
+function enterEditMode(){
+  editMode = true;
+  renderEditBar();
+  applyEditState();
+}
+
+function cancelEdit(){
+  editMode = false;
+  loadData();
+  renderEditBar();
+  render();
+}
+
+function applyChanges(){
   data.mainTitle = document.getElementById('mainTitle').innerText.trim();
   data.subtitleText = document.getElementById('subtitleText').innerText.trim();
   data.priceBracket = document.getElementById('priceBracket').innerText.trim();
   data.dateRange = document.getElementById('dateRange').innerText.trim();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  editMode = false;
+  renderEditBar();
+  render();
   const msg = document.getElementById('saveMsg');
-  msg.innerText = 'Saved.';
-  setTimeout(()=>{ msg.innerText=''; }, 2000);
+  msg.innerText = 'Changes saved — will stay next time you open this file.';
+  setTimeout(()=>{ msg.innerText=''; }, 3500);
 }
 
 function resetData(){
-  if(!confirm('Reset all data back to the default example? This clears your edits.')) return;
+  if(!confirm('Reset all data back to the default example? This clears your saved edits.')) return;
   localStorage.removeItem(STORAGE_KEY);
   loadData();
   render();
+  applyEditState();
 }
 
 ['mainTitle','subtitleText','priceBracket','dateRange'].forEach(id=>{
